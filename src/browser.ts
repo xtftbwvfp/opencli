@@ -434,6 +434,59 @@ export class Page implements IPage {
 }
 
 /**
+ * macOS only: auto-click Chrome's "Allow remote debugging?" dialog.
+ * Spawns an osascript process that polls the Accessibility tree for up to
+ * `timeoutSec` seconds looking for a button named "Allow" in Chrome's windows.
+ * Returns a handle to stop early and a promise resolving to whether the click succeeded.
+ */
+function autoAllowCdpDialog(timeoutSec = 5): { stop: () => void; clicked: Promise<boolean> } {
+  if (process.platform !== 'darwin') {
+    return { stop: () => {}, clicked: Promise.resolve(false) };
+  }
+  const script = `
+set startTime to current date
+repeat
+  if ((current date) - startTime) > ${timeoutSec} then
+    return "timeout"
+  end if
+  try
+    tell application "System Events"
+      tell process "Google Chrome"
+        repeat with w in windows
+          try
+            set allElements to entire contents of w
+            repeat with elem in allElements
+              try
+                if (class of elem is button) and (name of elem is "Allow") then
+                  click elem
+                  return "clicked"
+                end if
+              end try
+            end repeat
+          end try
+        end repeat
+      end tell
+    end tell
+  end try
+  delay 0.5
+end repeat
+`;
+  const proc = spawn('osascript', ['-e', script], { stdio: ['ignore', 'pipe', 'ignore'] });
+  let output = '';
+  proc.stdout?.on('data', (chunk: Buffer) => { output += chunk.toString(); });
+
+  const clicked = new Promise<boolean>((resolve) => {
+    proc.on('close', () => resolve(output.trim() === 'clicked'));
+    proc.on('error', () => resolve(false));
+  });
+
+  return {
+    stop: () => { if (!proc.killed) try { proc.kill(); } catch {} },
+    clicked,
+  };
+}
+
+/**
  * Playwright MCP process manager.
  */
 export class PlaywrightMCP {
@@ -526,11 +579,22 @@ export class PlaywrightMCP {
     // Some anti-bot sites (e.g. BOSS Zhipin) detect CDP — use forceExtension to bypass.
     const forceExt = opts.forceExtension || process.env.OPENCLI_FORCE_EXTENSION === '1';
     let cdpEndpoint: string | null = null;
+    let dialogHelper: ReturnType<typeof autoAllowCdpDialog> | null = null;
     if (!forceExt) {
       if (process.env.OPENCLI_CDP_ENDPOINT) {
         cdpEndpoint = process.env.OPENCLI_CDP_ENDPOINT;
       } else if (process.env.OPENCLI_USE_CDP === '1') {
         cdpEndpoint = await discoverChromeEndpoint();
+        if (!cdpEndpoint) {
+          // DevToolsActivePort not found — Chrome may be showing "Allow remote debugging?" dialog.
+          // On macOS, try to auto-click the "Allow" button and retry discovery.
+          dialogHelper = autoAllowCdpDialog(5);
+          for (let attempt = 0; attempt < 10 && !cdpEndpoint; attempt++) {
+            await new Promise(r => setTimeout(r, 500));
+            cdpEndpoint = await discoverChromeEndpoint();
+          }
+          dialogHelper.stop();
+        }
       }
     }
 
