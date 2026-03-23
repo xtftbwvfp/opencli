@@ -9,8 +9,9 @@
  */
 
 import { WebSocket, type RawData } from 'ws';
-import type { IPage } from '../types.js';
+import type { BrowserCookie, IPage, ScreenshotOptions, SnapshotOptions, WaitOptions } from '../types.js';
 import { wrapForEval } from './utils.js';
+import { generateSnapshotJs, scrollToRefJs, getFormStateJs } from './dom-snapshot.js';
 import {
   clickJs,
   typeTextJs,
@@ -19,6 +20,7 @@ import {
   scrollJs,
   autoScrollJs,
   networkRequestsJs,
+  waitForDomStableJs,
 } from './dom-helpers.js';
 
 export interface CDPTarget {
@@ -28,13 +30,24 @@ export interface CDPTarget {
   webSocketDebuggerUrl?: string;
 }
 
+interface RuntimeEvaluateResult {
+  result?: {
+    value?: unknown;
+  };
+  exceptionDetails?: {
+    exception?: {
+      description?: string;
+    };
+  };
+}
+
 const CDP_SEND_TIMEOUT = 30_000; // 30s per command
 
 export class CDPBridge {
   private _ws: WebSocket | null = null;
   private _idCounter = 0;
-  private _pending = new Map<number, { resolve: (val: any) => void; reject: (err: Error) => void; timer: ReturnType<typeof setTimeout> }>();
-  private _eventListeners = new Map<string, Set<(params: any) => void>>();
+  private _pending = new Map<number, { resolve: (val: unknown) => void; reject: (err: Error) => void; timer: ReturnType<typeof setTimeout> }>();
+  private _eventListeners = new Map<string, Set<(params: unknown) => void>>();
 
   async connect(opts?: { timeout?: number; workspace?: string }): Promise<IPage> {
     const endpoint = process.env.OPENCLI_CDP_ENDPOINT;
@@ -55,7 +68,8 @@ export class CDPBridge {
 
     return new Promise((resolve, reject) => {
       const ws = new WebSocket(wsUrl);
-      const timeout = setTimeout(() => reject(new Error('CDP connect timeout')), opts?.timeout ?? 10000);
+      const timeoutMs = (opts?.timeout ?? 10) * 1000; // opts.timeout is in seconds
+      const timeout = setTimeout(() => reject(new Error('CDP connect timeout')), timeoutMs);
 
       ws.on('open', () => {
         clearTimeout(timeout);
@@ -110,7 +124,7 @@ export class CDPBridge {
   }
 
   /** Send a CDP command with timeout guard (P0 fix #4) */
-  async send(method: string, params: any = {}, timeoutMs: number = CDP_SEND_TIMEOUT): Promise<any> {
+  async send(method: string, params: Record<string, unknown> = {}, timeoutMs: number = CDP_SEND_TIMEOUT): Promise<unknown> {
     if (!this._ws || this._ws.readyState !== WebSocket.OPEN) {
       throw new Error('CDP connection is not open');
     }
@@ -126,25 +140,25 @@ export class CDPBridge {
   }
 
   /** Listen for a CDP event */
-  on(event: string, handler: (params: any) => void): void {
+  on(event: string, handler: (params: unknown) => void): void {
     let set = this._eventListeners.get(event);
     if (!set) { set = new Set(); this._eventListeners.set(event, set); }
     set.add(handler);
   }
 
   /** Remove a CDP event listener */
-  off(event: string, handler: (params: any) => void): void {
+  off(event: string, handler: (params: unknown) => void): void {
     this._eventListeners.get(event)?.delete(handler);
   }
 
   /** Wait for a CDP event to fire (one-shot) */
-  waitForEvent(event: string, timeoutMs: number = 15_000): Promise<any> {
+  waitForEvent(event: string, timeoutMs: number = 15_000): Promise<unknown> {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.off(event, handler);
         reject(new Error(`Timed out waiting for CDP event '${event}'`));
       }, timeoutMs);
-      const handler = (params: any) => {
+      const handler = (params: unknown) => {
         clearTimeout(timer);
         this.off(event, handler);
         resolve(params);
@@ -164,37 +178,46 @@ class CDPPage implements IPage {
       .catch(() => {}); // Don't fail if event times out
     await this.bridge.send('Page.navigate', { url });
     await loadPromise;
-    // Post-load settle: SPA frameworks need extra time to render after load event
+    // Smart settle: use DOM stability detection instead of fixed sleep.
+    // settleMs is now a timeout cap (default 1000ms), not a fixed wait.
     if (options?.waitUntil !== 'none') {
-      const settleMs = options?.settleMs ?? 1000;
-      await new Promise(resolve => setTimeout(resolve, settleMs));
+      const maxMs = options?.settleMs ?? 1000;
+      await this.evaluate(waitForDomStableJs(maxMs, Math.min(500, maxMs)));
     }
   }
 
-  async evaluate(js: string): Promise<any> {
+  async evaluate(js: string): Promise<unknown> {
     const expression = wrapForEval(js);
     const result = await this.bridge.send('Runtime.evaluate', {
       expression,
       returnByValue: true,
       awaitPromise: true
-    });
+    }) as RuntimeEvaluateResult;
     if (result.exceptionDetails) {
       throw new Error('Evaluate error: ' + (result.exceptionDetails.exception?.description || 'Unknown exception'));
     }
     return result.result?.value;
   }
 
-  async getCookies(opts: { domain?: string; url?: string } = {}): Promise<any[]> {
+  async getCookies(opts: { domain?: string; url?: string } = {}): Promise<BrowserCookie[]> {
     const result = await this.bridge.send('Network.getCookies', opts.url ? { urls: [opts.url] } : {});
-    const cookies = Array.isArray(result?.cookies) ? result.cookies : [];
-    return opts.domain
-      ? cookies.filter((cookie: any) => typeof cookie.domain === 'string' && cookie.domain.includes(opts.domain!))
+    const cookies = isRecord(result) && Array.isArray(result.cookies) ? result.cookies : [];
+    const domain = opts.domain;
+    return domain
+      ? cookies.filter((cookie): cookie is BrowserCookie => isCookie(cookie) && cookie.domain.includes(domain))
       : cookies;
   }
 
-  async snapshot(_opts?: any): Promise<any> {
-    // CDP doesn't have a built-in accessibility tree equivalent without additional setup
-    return '(snapshot not available in CDP mode)';
+  async snapshot(opts: SnapshotOptions = {}): Promise<unknown> {
+    const snapshotJs = generateSnapshotJs({
+      viewportExpand: opts.viewportExpand ?? 800,
+      maxDepth: Math.max(1, Math.min(Number(opts.maxDepth) || 50, 200)),
+      interactiveOnly: opts.interactive ?? false,
+      maxTextLength: opts.maxTextLength ?? 120,
+      includeScrollInfo: true,
+      bboxDedup: true,
+    });
+    return this.evaluate(snapshotJs);
   }
 
   // ── Shared DOM operations (P1 fix #5 — using dom-helpers.ts) ──
@@ -211,13 +234,22 @@ class CDPPage implements IPage {
     await this.evaluate(pressKeyJs(key));
   }
 
-  async wait(options: any): Promise<void> {
+  async scrollTo(ref: string): Promise<unknown> {
+    return this.evaluate(scrollToRefJs(ref));
+  }
+
+  async getFormState(): Promise<Record<string, unknown>> {
+    return (await this.evaluate(getFormStateJs())) as Record<string, unknown>;
+  }
+
+  async wait(options: number | WaitOptions): Promise<void> {
     if (typeof options === 'number') {
       await new Promise(resolve => setTimeout(resolve, options * 1000));
       return;
     }
-    if (options.time) {
-      await new Promise(resolve => setTimeout(resolve, options.time * 1000));
+    if (typeof options.time === 'number') {
+      const waitTime = options.time;
+      await new Promise(resolve => setTimeout(resolve, waitTime * 1000));
       return;
     }
     if (options.text) {
@@ -238,13 +270,13 @@ class CDPPage implements IPage {
     await this.evaluate(autoScrollJs(times, delayMs));
   }
 
-  async screenshot(options: any = {}): Promise<string> {
+  async screenshot(options: ScreenshotOptions = {}): Promise<string> {
     const result = await this.bridge.send('Page.captureScreenshot', {
       format: options.format ?? 'png',
       quality: options.format === 'jpeg' ? (options.quality ?? 80) : undefined,
       captureBeyondViewport: options.fullPage ?? false,
     });
-    const base64 = result.data;
+    const base64 = isRecord(result) && typeof result.data === 'string' ? result.data : '';
     if (options.path) {
       const fs = await import('node:fs');
       const path = await import('node:path');
@@ -255,11 +287,12 @@ class CDPPage implements IPage {
     return base64;
   }
 
-  async networkRequests(includeStatic: boolean = false): Promise<any> {
-    return this.evaluate(networkRequestsJs(includeStatic));
+  async networkRequests(includeStatic: boolean = false): Promise<unknown[]> {
+    const result = await this.evaluate(networkRequestsJs(includeStatic));
+    return Array.isArray(result) ? result : [];
   }
 
-  async tabs(): Promise<any> {
+  async tabs(): Promise<unknown[]> {
     return [];
   }
 
@@ -275,7 +308,7 @@ class CDPPage implements IPage {
     // Not supported in direct CDP mode
   }
 
-  async consoleMessages(_level?: string): Promise<any> {
+  async consoleMessages(_level?: string): Promise<unknown[]> {
     return [];
   }
 
@@ -287,11 +320,22 @@ class CDPPage implements IPage {
     }));
   }
 
-  async getInterceptedRequests(): Promise<any[]> {
+  async getInterceptedRequests(): Promise<unknown[]> {
     const { generateReadInterceptedJs } = await import('../interceptor.js');
     const result = await this.evaluate(generateReadInterceptedJs('__opencli_xhr'));
-    return (result as any[]) || [];
+    return Array.isArray(result) ? result : [];
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isCookie(value: unknown): value is BrowserCookie {
+  return isRecord(value)
+    && typeof value.name === 'string'
+    && typeof value.value === 'string'
+    && typeof value.domain === 'string';
 }
 
 // ── CDP target selection (unchanged) ──
@@ -343,7 +387,6 @@ function scoreCDPTarget(target: CDPTarget, preferredPattern?: RegExp): number {
   if (title.includes('chatwise')) score += 120;
   if (title.includes('notion')) score += 120;
   if (title.includes('discord')) score += 120;
-  if (title.includes('netease')) score += 120;
 
   if (url.includes('antigravity')) score += 100;
   if (url.includes('codex')) score += 100;
@@ -351,7 +394,6 @@ function scoreCDPTarget(target: CDPTarget, preferredPattern?: RegExp): number {
   if (url.includes('chatwise')) score += 100;
   if (url.includes('notion')) score += 100;
   if (url.includes('discord')) score += 100;
-  if (url.includes('netease')) score += 100;
 
   return score;
 }

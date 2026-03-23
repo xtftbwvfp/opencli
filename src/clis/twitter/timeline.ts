@@ -2,8 +2,24 @@ import { cli, Strategy } from '../../registry.js';
 
 // ── Twitter GraphQL constants ──────────────────────────────────────────
 
-const BEARER_TOKEN = 'AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
+const BEARER_TOKEN =
+  'AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
 const HOME_TIMELINE_QUERY_ID = 'c-CzHF1LboFilMpsx4ZCrQ';
+const HOME_LATEST_TIMELINE_QUERY_ID = 'BKB7oi212Fi7kQtCBGE4zA';
+
+type TimelineType = 'for-you' | 'following';
+
+interface TimelineEndpointConfig {
+  endpoint: string;
+  method: 'GET' | 'POST';
+  fallbackQueryId: string;
+}
+
+// Endpoint config: for-you uses GET HomeTimeline, following uses POST HomeLatestTimeline
+const TIMELINE_ENDPOINTS: Record<TimelineType, TimelineEndpointConfig> = {
+  'for-you': { endpoint: 'HomeTimeline', method: 'GET', fallbackQueryId: HOME_TIMELINE_QUERY_ID },
+  following: { endpoint: 'HomeLatestTimeline', method: 'POST', fallbackQueryId: HOME_LATEST_TIMELINE_QUERY_ID },
+};
 
 const FEATURES = {
   rweb_video_screen_enabled: false,
@@ -53,19 +69,26 @@ interface TimelineTweet {
   url: string;
 }
 
-function buildHomeTimelineUrl(count: number, cursor?: string | null): string {
-  const vars: Record<string, any> = {
+function buildTimelineVariables(type: TimelineType, count: number, cursor?: string | null): Record<string, unknown> {
+  const vars: Record<string, unknown> = {
     count,
     includePromotedContent: false,
     latestControlAvailable: true,
     requestContext: 'launch',
-    withCommunity: true,
   };
+  if (type === 'for-you') vars.withCommunity = true;
+  if (type === 'following') vars.seenTweetIds = [];
   if (cursor) vars.cursor = cursor;
+  return vars;
+}
 
-  return `/i/api/graphql/${HOME_TIMELINE_QUERY_ID}/HomeTimeline`
-    + `?variables=${encodeURIComponent(JSON.stringify(vars))}`
-    + `&features=${encodeURIComponent(JSON.stringify(FEATURES))}`;
+function buildHomeTimelineUrl(queryId: string, endpoint: string, vars: Record<string, unknown>): string {
+
+  return (
+    `/i/api/graphql/${queryId}/${endpoint}` +
+    `?variables=${encodeURIComponent(JSON.stringify(vars))}` +
+    `&features=${encodeURIComponent(JSON.stringify(FEATURES))}`
+  );
 }
 
 function extractTweet(result: any, seen: Set<string>): TimelineTweet | null {
@@ -97,8 +120,8 @@ function parseHomeTimeline(data: any, seen: Set<string>): { tweets: TimelineTwee
   const tweets: TimelineTweet[] = [];
   let nextCursor: string | null = null;
 
-  const instructions =
-    data?.data?.home?.home_timeline_urt?.instructions || [];
+  // Both HomeTimeline and HomeLatestTimeline share the same response envelope
+  const instructions = data?.data?.home?.home_timeline_urt?.instructions || [];
 
   for (const inst of instructions) {
     for (const entry of inst.entries || []) {
@@ -144,16 +167,24 @@ function parseHomeTimeline(data: any, seen: Set<string>): { tweets: TimelineTwee
 cli({
   site: 'twitter',
   name: 'timeline',
-  description: 'Fetch Twitter Home Timeline',
+  description: 'Fetch Twitter timeline (for-you or following)',
   domain: 'x.com',
   strategy: Strategy.COOKIE,
   browser: true,
   args: [
+    {
+      name: 'type',
+      default: 'for-you',
+      choices: ['for-you', 'following'],
+      help: 'Timeline type: for-you (algorithmic) or following (chronological)',
+    },
     { name: 'limit', type: 'int', default: 20 },
   ],
   columns: ['id', 'author', 'text', 'likes', 'retweets', 'replies', 'views', 'created_at', 'url'],
   func: async (page, kwargs) => {
     const limit = kwargs.limit || 20;
+    const timelineType: TimelineType = kwargs.type === 'following' ? 'following' : 'for-you';
+    const { endpoint, method, fallbackQueryId } = TIMELINE_ENDPOINTS[timelineType];
 
     // Navigate to x.com for cookie context
     await page.goto('https://x.com');
@@ -165,22 +196,24 @@ cli({
     }`);
     if (!ct0) throw new Error('Not logged into x.com (no ct0 cookie)');
 
-    // Dynamically resolve queryId
-    const queryId = await page.evaluate(`async () => {
+    // Dynamically resolve queryId for the selected endpoint
+    const resolved = await page.evaluate(`async () => {
       try {
         const ghResp = await fetch('https://raw.githubusercontent.com/fa0311/twitter-openapi/refs/heads/main/src/config/placeholder.json');
         if (ghResp.ok) {
           const data = await ghResp.json();
-          const entry = data['HomeTimeline'];
+          const entry = data['${endpoint}'];
           if (entry && entry.queryId) return entry.queryId;
         }
       } catch {}
       return null;
-    }`) || HOME_TIMELINE_QUERY_ID;
+    }`);
+    // Validate queryId format to prevent injection from untrusted upstream
+    const queryId = typeof resolved === 'string' && /^[A-Za-z0-9_-]+$/.test(resolved) ? resolved : fallbackQueryId;
 
     // Build auth headers
     const headers = JSON.stringify({
-      'Authorization': `Bearer ${decodeURIComponent(BEARER_TOKEN)}`,
+      Authorization: `Bearer ${decodeURIComponent(BEARER_TOKEN)}`,
       'X-Csrf-Token': ct0,
       'X-Twitter-Auth-Type': 'OAuth2Session',
       'X-Twitter-Active-User': 'yes',
@@ -193,16 +226,17 @@ cli({
 
     for (let i = 0; i < 5 && allTweets.length < limit; i++) {
       const fetchCount = Math.min(40, limit - allTweets.length + 5); // over-fetch slightly for promoted filtering
-      const apiUrl = buildHomeTimelineUrl(fetchCount, cursor)
-        .replace(HOME_TIMELINE_QUERY_ID, queryId);
+      const variables = buildTimelineVariables(timelineType, fetchCount, cursor);
+      const apiUrl = buildHomeTimelineUrl(queryId, endpoint, variables);
 
       const data = await page.evaluate(`async () => {
-        const r = await fetch("${apiUrl}", { headers: ${headers}, credentials: 'include' });
+        const r = await fetch("${apiUrl}", { method: "${method}", headers: ${headers}, credentials: 'include' });
         return r.ok ? await r.json() : { error: r.status };
       }`);
 
       if (data?.error) {
-        if (allTweets.length === 0) throw new Error(`HTTP ${data.error}: Failed to fetch timeline. queryId may have expired.`);
+        if (allTweets.length === 0)
+          throw new Error(`HTTP ${data.error}: Failed to fetch timeline. queryId may have expired.`);
         break;
       }
 
@@ -216,3 +250,9 @@ cli({
     return allTweets.slice(0, limit);
   },
 });
+
+export const __test__ = {
+  buildTimelineVariables,
+  buildHomeTimelineUrl,
+  parseHomeTimeline,
+};

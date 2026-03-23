@@ -34,8 +34,8 @@ Run `opencli list` for the live registry.
 | Site | Commands | Mode |
 |------|----------|------|
 | **[hackernews](/adapters/browser/hackernews)** | `top` | 🌐 Public |
-| **[github](/adapters/browser/github)** | `search` | 🌐 Public |
 | **[bbc](/adapters/browser/bbc)** | `news` | 🌐 Public |
+| **[devto](/adapters/browser/devto)** | `top` `tag` `user` | 🌐 Public |
 | **[apple-podcasts](/adapters/browser/apple-podcasts)** | `search` `episodes` `top` | 🌐 Public |
 | **[xiaoyuzhou](/adapters/browser/xiaoyuzhou)** | `podcast` `podcast-episodes` `episode` | 🌐 Public |
 | **[yahoo-finance](/adapters/browser/yahoo-finance)** | `quote` | 🌐 Public |
@@ -57,6 +57,3 @@ Run `opencli list` for the live registry.
 | **[ChatWise](/adapters/desktop/chatwise)** | Multi-LLM client | `status` `new` `send` `read` `ask` `model` `history` `export` `screenshot` |
 | **[Notion](/adapters/desktop/notion)** | Search, read, write pages | `status` `search` `read` `new` `write` `sidebar` `favorites` `export` |
 | **[Discord](/adapters/desktop/discord)** | Desktop messages & channels | `status` `send` `read` `channels` `servers` `search` `members` |
-| **[Feishu](/adapters/desktop/feishu)** | 飞书/Lark via AppleScript | `status` `send` `read` `search` `new` |
-| **[WeChat](/adapters/desktop/wechat)** | 微信 via AppleScript | `status` `send` `read` `search` `chats` `contacts` |
-| **[NeteaseMusic](/adapters/desktop/neteasemusic)** | 网易云音乐 via CDP | `status` `playing` `play` `next` `prev` `search` `playlist` `like` `lyrics` `volume` |

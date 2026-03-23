@@ -1,8 +1,35 @@
-import { describe, expect, it } from 'vitest';
-import { renderBrowserDoctorReport } from './doctor.js';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const { mockCheckDaemonStatus, mockListSessions, mockConnect, mockClose } = vi.hoisted(() => ({
+  mockCheckDaemonStatus: vi.fn(),
+  mockListSessions: vi.fn(),
+  mockConnect: vi.fn(),
+  mockClose: vi.fn(),
+}));
+
+vi.mock('./browser/discover.js', () => ({
+  checkDaemonStatus: mockCheckDaemonStatus,
+}));
+
+vi.mock('./browser/daemon-client.js', () => ({
+  listSessions: mockListSessions,
+}));
+
+vi.mock('./browser/index.js', () => ({
+  BrowserBridge: class {
+    connect = mockConnect;
+    close = mockClose;
+  },
+}));
+
+import { renderBrowserDoctorReport, runBrowserDoctor } from './doctor.js';
 
 describe('doctor report rendering', () => {
   const strip = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, '');
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
 
   it('renders OK-style report when daemon and extension connected', () => {
     const text = strip(renderBrowserDoctorReport({
@@ -57,6 +84,28 @@ describe('doctor report rendering', () => {
       issues: [],
     }));
 
-    expect(text).toContain('[SKIP] Connectivity: not tested (use --live)');
+    expect(text).toContain('[SKIP] Connectivity: skipped (--no-live)');
+  });
+
+  it('reports consistent status when live check auto-starts the daemon', async () => {
+    // checkDaemonStatus is called twice: once for auto-start check, once for final status.
+    // First call: daemon not running (triggers auto-start attempt)
+    mockCheckDaemonStatus.mockResolvedValueOnce({ running: false, extensionConnected: false });
+    // Auto-start attempt via BrowserBridge.connect fails
+    mockConnect.mockRejectedValueOnce(new Error('Could not start daemon'));
+    // Second call: daemon still not running after failed auto-start
+    mockCheckDaemonStatus.mockResolvedValueOnce({ running: false, extensionConnected: false });
+
+    const report = await runBrowserDoctor({ live: false });
+
+    // Status reflects daemon not running
+    expect(report.daemonRunning).toBe(false);
+    expect(report.extensionConnected).toBe(false);
+    // checkDaemonStatus called twice (initial + final)
+    expect(mockCheckDaemonStatus).toHaveBeenCalledTimes(2);
+    // Should report daemon not running
+    expect(report.issues).toEqual(expect.arrayContaining([
+      expect.stringContaining('Daemon is not running'),
+    ]));
   });
 });

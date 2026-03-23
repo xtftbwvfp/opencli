@@ -9,30 +9,12 @@
 [![Node.js Version](https://img.shields.io/node/v/@jackwener/opencli?style=flat-square)](https://nodejs.org)
 [![License](https://img.shields.io/npm/l/@jackwener/opencli?style=flat-square)](./LICENSE)
 
-A CLI tool that turns **any website** or **Electron app** into a command-line interface — Bilibili, Zhihu, 小红书, Twitter/X, Reddit, YouTube, Antigravity, and [many more](#built-in-commands) — powered by browser session reuse and AI-native discovery.
+A CLI tool that turns **any website**, **Electron app**, or **local CLI tool** into a command-line interface — Bilibili, Zhihu, 小红书, Twitter/X, Reddit, YouTube, Antigravity, `gh`, `docker`, and [many more](#built-in-commands) — powered by browser session reuse and AI-native discovery.
 
 **Built for AI Agents**: Simply configure an instruction in your global `AGENT.md` or `.cursorrules` guiding the AI to execute `opencli list` via Bash to discover available tools. Register your favorite local CLIs (`opencli register mycli`), and the AI will automatically learn how to invoke all your tools perfectly!
 
 **CLI All Electron Apps! The Most Powerful Update Has Arrived!**
 Turn ANY Electron application into a CLI tool! Recombine, script, and extend applications like Antigravity Ultra seamlessly. Now AI can control itself natively. Unlimited possibilities await!
-
----
-
-## Table of Contents
-
-- [Highlights](#highlights)
-- [Prerequisites](#prerequisites)
-- [Quick Start](#quick-start)
-- [Built-in Commands](#built-in-commands)
-  - [Desktop App Adapters](#desktop-app-adapters)
-- [Download Support](#download-support)
-- [Output Formats](#output-formats)
-- [For AI Agents (Developer Guide)](#for-ai-agents-developer-guide)
-- [Remote Chrome (Server/Headless)](#remote-chrome-serverheadless)
-- [Testing](#testing)
-- [Troubleshooting](#troubleshooting)
-- [Releasing New Versions](#releasing-new-versions)
-- [License](#license)
 
 ---
 
@@ -42,7 +24,7 @@ Turn ANY Electron application into a CLI tool! Recombine, script, and extend app
 - **Account-safe** — Reuses Chrome's logged-in state; your credentials never leave the browser.
 - **AI Agent ready** — `explore` discovers APIs, `synthesize` generates adapters, `cascade` finds auth strategies.
 - **External CLI Hub** — Discover, auto-install, and passthrough commands to any external CLI (gh, obsidian, docker, kubectl, etc). Zero setup.
-- **Self-healing setup** — `opencli setup` verifies Browser Bridge connectivity; `opencli doctor` diagnoses daemon, extension, and live browser connectivity.
+- **Self-healing setup** — `opencli doctor` diagnoses and auto-starts the daemon, extension, and live browser connectivity.
 - **Dynamic Loader** — Simply drop `.ts` or `.yaml` adapters into the `clis/` folder for auto-registration.
 - **Dual-Engine Architecture** — Supports both YAML declarative data pipelines and robust browser runtime TypeScript injections.
 
@@ -60,11 +42,11 @@ OpenCLI connects to your browser through a lightweight **Browser Bridge** Chrome
 You can install the extension via either method:
 
 **Method 1: Download Pre-built Release (Recommended)**
-1. Go to the GitHub [Releases page](https://github.com/jackwener/opencli/releases) and download the latest `opencli-extension.zip` or `opencli-extension.crx`.
-2. Open `chrome://extensions` and enable **Developer mode** (top-right toggle).
-3. Drag and drop the `.crx` file or the unzipped folder into the extensions page.
+1. Go to the GitHub [Releases page](https://github.com/jackwener/opencli/releases) and download the latest `opencli-extension.zip`.
+2. Unzip the file and open `chrome://extensions`, enable **Developer mode** (top-right toggle).
+3. Click **Load unpacked** and select the unzipped folder.
 
-**Method 2: Load Unpacked Source (For Developers)**
+**Method 2: Load Source (For Developers)**
 1. Open `chrome://extensions` and enable **Developer mode**.
 2. Click **Load unpacked** and select the `extension/` directory from this repository.
 
@@ -73,7 +55,6 @@ That's it! The daemon auto-starts when you run any browser command. No tokens, n
 > **Tip**: Use `opencli doctor` for ongoing diagnosis:
 > ```bash
 > opencli doctor            # Check extension + daemon connectivity
-> opencli doctor --live     # Also test live browser commands
 > ```
 
 ## Quick Start
@@ -127,20 +108,21 @@ Run `opencli list` for the live registry.
 | **notion** | `status` `search` `read` `new` `write` `sidebar` `favorites` `export` | Desktop |
 | **discord-app** | `status` `send` `read` `channels` `servers` `search` `members` | Desktop |
 | **v2ex** | `hot` `latest` `topic` `daily` `me` `notifications` | Public / Browser |
-| **xueqiu** | `feed` `hot-stock` `hot` `search` `stock` `watchlist` | Browser |
-| **antigravity** | `status` `send` `read` `new` `dump` `extract-code` `model` `watch` | Desktop |
+| **xueqiu** | `feed` `hot-stock` `hot` `search` `stock` `watchlist` `earnings-date` | Browser |
+| **antigravity** | `status` `send` `read` `new` `dump` `extract-code` `model` `watch` `serve` | Desktop |
 | **chatgpt** | `status` `new` `send` `read` `ask` | Desktop |
 | **xiaohongshu** | `search` `notifications` `feed` `user` `download` `creator-notes` `creator-note-detail` `creator-notes-summary` `creator-profile` `creator-stats` | Browser |
 | **apple-podcasts** | `search` `episodes` `top` | Public |
 | **xiaoyuzhou** | `podcast` `podcast-episodes` `episode` | Public |
 | **zhihu** | `hot` `search` `question` `download` | Browser |
+| **weixin** | `download` | Browser |
 | **youtube** | `search` `video` `transcript` | Browser |
 | **boss** | `search` `detail` `recommend` `joblist` `greet` `batchgreet` `send` `chatlist` `chatmsg` `invite` `mark` `exchange` `resume` `stats` | Browser |
 | **coupang** | `search` `add-to-cart` | Browser |
 | **bbc** | `news` | Public |
 | **bloomberg** | `main` `markets` `economics` `industries` `tech` `politics` `businessweek` `opinions` `feeds` `news` | Public / Browser |
 | **ctrip** | `search` | Browser |
-| **github** | `search` | Public |
+| **devto** | `top` `tag` `user` | Public |
 | **arxiv** | `search` `paper` | Public |
 | **wikipedia** | `search` `summary` | Public |
 | **hackernews** | `top` | Public |
@@ -158,9 +140,10 @@ Run `opencli list` for the live registry.
 | **jimeng** | `generate` `history` | Browser |
 | **linux-do** | `hot` `latest` `search` `categories` `category` `topic` | Public |
 | **stackoverflow** | `hot` `search` `bounties` `unanswered` | Public |
+| **steam** | `top-sellers` | Public |
 | **weread** | `shelf` `search` `book` `highlights` `notes` `notebooks` `ranking` | Browser |
+| **douban** | `search` `top250` `subject` `marks` `reviews` | Browser |
 
-> **Bloomberg note**: The RSS-backed Bloomberg listing commands (`main`, section feeds, `feeds`) work without a browser. `bloomberg news` is for standard Bloomberg story/article pages that your current Chrome session can already access. Audio and some other non-standard pages may fail, and OpenCLI does not bypass Bloomberg paywall or entitlement checks.
 
 ### External CLI Hub
 
@@ -197,9 +180,6 @@ Each desktop adapter has its own detailed documentation with commands reference,
 | **ChatWise** | Multi-LLM client (GPT-4, Claude, Gemini) | [Doc](./docs/adapters/desktop/chatwise.md) |
 | **Notion** | Search, read, write Notion pages | [Doc](./docs/adapters/desktop/notion.md) |
 | **Discord** | Discord Desktop — messages, channels, servers | [Doc](./docs/adapters/desktop/discord.md) |
-| **Feishu** | 飞书/Lark Desktop via AppleScript | [Doc](./docs/adapters/desktop/feishu.md) |
-| **WeChat** | 微信 Desktop via AppleScript + Accessibility | [Doc](./docs/adapters/desktop/wechat.md) |
-| **NeteaseMusic** | 网易云音乐 Desktop via CEF/CDP | [Doc](./docs/adapters/desktop/neteasemusic.md) |
 
 ## Download Support
 
@@ -213,6 +193,7 @@ OpenCLI supports downloading images, videos, and articles from supported platfor
 | **bilibili** | Videos | Requires `yt-dlp` installed |
 | **twitter** | Images, Videos | Downloads from user media tab or single tweet |
 | **zhihu** | Articles (Markdown) | Exports articles with optional image download |
+| **weixin** | Articles (Markdown) | Exports WeChat Official Account articles |
 
 ### Prerequisites
 
@@ -229,11 +210,11 @@ brew install yt-dlp
 
 ```bash
 # Download images/videos from Xiaohongshu note
-opencli xiaohongshu download --note-id abc123 --output ./xhs
+opencli xiaohongshu download abc123 --output ./xhs
 
 # Download Bilibili video (requires yt-dlp)
-opencli bilibili download --bvid BV1xxx --output ./bilibili
-opencli bilibili download --bvid BV1xxx --quality 1080p  # Specify quality
+opencli bilibili download BV1xxx --output ./bilibili
+opencli bilibili download BV1xxx --quality 1080p  # Specify quality
 
 # Download Twitter media from user
 opencli twitter download elonmusk --limit 20 --output ./twitter
@@ -246,22 +227,12 @@ opencli zhihu download "https://zhuanlan.zhihu.com/p/xxx" --output ./zhihu
 
 # Export with local images
 opencli zhihu download "https://zhuanlan.zhihu.com/p/xxx" --download-images
+
+# Export WeChat article to Markdown
+opencli weixin download --url "https://mp.weixin.qq.com/s/xxx" --output ./weixin
 ```
 
-### Pipeline Step (for YAML adapters)
 
-The `download` step can be used in YAML pipelines:
-
-```yaml
-pipeline:
-  - fetch: https://api.example.com/media
-  - download:
-      url: ${{ item.imageUrl }}
-      dir: ./downloads
-      filename: ${{ item.title | sanitize }}.jpg
-      concurrency: 5
-      skip_existing: true
-```
 
 ## Output Formats
 
@@ -304,26 +275,14 @@ Explore outputs to `.opencli/explore/<site>/` (manifest.json, endpoints.json, ca
 
 ## Testing
 
-See **[TESTING.md](./TESTING.md)** for the full testing guide, including:
-
-- Current test coverage (unit + E2E tests across browser and desktop adapters)
-- How to run tests locally
-- How to add tests when creating new adapters
-- CI/CD pipeline with sharding
-- Headless browser mode (`OPENCLI_HEADLESS=1`)
-
-```bash
-# Quick start
-npm run build
-npx vitest run                              # All tests
-npx vitest run src/                          # Unit tests only
-npx vitest run tests/e2e/                    # E2E tests
-```
+See **[TESTING.md](./TESTING.md)** for how to run and write tests.
 
 ## Troubleshooting
 
 - **"Extension not connected"**
   - Ensure the opencli Browser Bridge extension is installed and **enabled** in `chrome://extensions`.
+- **"attach failed: Cannot access a chrome-extension:// URL"**
+  - Another Chrome extension (e.g. youmind, New Tab Override, or AI assistant extensions) may be interfering. Try **disabling other extensions** temporarily, then retry.
 - **Empty data returns or 'Unauthorized' error**
   - Your login session in Chrome might have expired. Open a normal Chrome tab, navigate to the target site, and log in or refresh the page.
 - **Node API errors**
@@ -332,15 +291,12 @@ npx vitest run tests/e2e/                    # E2E tests
   - Check daemon status: `curl localhost:19825/status`
   - View extension logs: `curl localhost:19825/logs`
 
-## Releasing New Versions
 
-```bash
-npm version patch   # 0.1.0 → 0.1.1
-npm version minor   # 0.1.0 → 0.2.0
-git push --follow-tags
-```
+## Star History
 
-The CI will automatically build, create a GitHub release, and publish to npm.
+[![Star History Chart](https://api.star-history.com/svg?repos=jackwener/opencli&type=Date)](https://star-history.com/#jackwener/opencli&Date)
+
+After publishing the new version, remember to update the browser extension in the Chrome Web Store as well, so the extension release stays in sync with the CLI release.
 
 ## License
 

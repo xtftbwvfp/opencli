@@ -11,8 +11,21 @@ export function clickJs(ref: string): string {
   return `
     (() => {
       const ref = ${safeRef};
-      const el = document.querySelector('[data-ref="' + ref + '"]')
-        || document.querySelectorAll('a, button, input, [role="button"], [tabindex]')[parseInt(ref, 10) || 0];
+      // 1. data-opencli-ref (set by snapshot engine)
+      let el = document.querySelector('[data-opencli-ref="' + ref + '"]');
+      // 2. data-ref (legacy)
+      if (!el) el = document.querySelector('[data-ref="' + ref + '"]');
+      // 3. CSS selector
+      if (!el && ref.match(/^[a-zA-Z#.\\[]/)) {
+        try { el = document.querySelector(ref); } catch {}
+      }
+      // 4. Numeric index into interactive elements
+      if (!el) {
+        const idx = parseInt(ref, 10);
+        if (!isNaN(idx)) {
+          el = document.querySelectorAll('a, button, input, select, textarea, [role="button"], [tabindex]:not([tabindex="-1"])')[idx];
+        }
+      }
       if (!el) throw new Error('Element not found: ' + ref);
       el.scrollIntoView({ behavior: 'instant', block: 'center' });
       el.click();
@@ -28,13 +41,31 @@ export function typeTextJs(ref: string, text: string): string {
   return `
     (() => {
       const ref = ${safeRef};
-      const el = document.querySelector('[data-ref="' + ref + '"]')
-        || document.querySelectorAll('input, textarea, [contenteditable]')[parseInt(ref, 10) || 0];
+      // 1. data-opencli-ref (set by snapshot engine)
+      let el = document.querySelector('[data-opencli-ref="' + ref + '"]');
+      // 2. data-ref (legacy)
+      if (!el) el = document.querySelector('[data-ref="' + ref + '"]');
+      // 3. CSS selector
+      if (!el && ref.match(/^[a-zA-Z#.\\[]/)) {
+        try { el = document.querySelector(ref); } catch {}
+      }
+      // 4. Numeric index into typeable elements
+      if (!el) {
+        const idx = parseInt(ref, 10);
+        if (!isNaN(idx)) {
+          el = document.querySelectorAll('input, textarea, [contenteditable="true"]')[idx];
+        }
+      }
       if (!el) throw new Error('Element not found: ' + ref);
       el.focus();
-      el.value = ${safeText};
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-      el.dispatchEvent(new Event('change', { bubbles: true }));
+      if (el.isContentEditable) {
+        el.textContent = ${safeText};
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+      } else {
+        el.value = ${safeText};
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      }
       return 'typed';
     })()
   `;
@@ -112,5 +143,39 @@ export function networkRequestsJs(includeStatic: boolean): string {
           size: e.transferSize || 0,
         }));
     })()
+  `;
+}
+
+/**
+ * Generate JS to wait until the DOM stabilizes (no mutations for `quietMs`),
+ * with a hard cap at `maxMs`. Uses MutationObserver in the browser.
+ *
+ * Returns as soon as the page stops changing, avoiding unnecessary fixed waits.
+ * If document.body is not available, falls back to a fixed sleep of maxMs.
+ */
+export function waitForDomStableJs(maxMs: number, quietMs: number): string {
+  return `
+    new Promise(resolve => {
+      if (!document.body) {
+        setTimeout(() => resolve('nobody'), ${maxMs});
+        return;
+      }
+      let timer = null;
+      let cap = null;
+      const done = (reason) => {
+        clearTimeout(timer);
+        clearTimeout(cap);
+        obs.disconnect();
+        resolve(reason);
+      };
+      const resetQuiet = () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => done('quiet'), ${quietMs});
+      };
+      const obs = new MutationObserver(resetQuiet);
+      obs.observe(document.body, { childList: true, subtree: true, attributes: true });
+      resetQuiet();
+      cap = setTimeout(() => done('capped'), ${maxMs});
+    })
   `;
 }

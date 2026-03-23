@@ -36,6 +36,17 @@ export interface CliCommand {
   timeoutSeconds?: number;
   source?: string;
   footerExtra?: (kwargs: Record<string, any>) => string | undefined;
+  /**
+   * Control pre-navigation for cookie/header context before command execution.
+   *
+   * Browser adapters using COOKIE/HEADER strategy need the page to be on the
+   * target domain so that `fetch(url, { credentials: 'include' })` carries cookies.
+   *
+   * - `undefined` / `true`: navigate to `https://${domain}` (default)
+   * - `false`: skip — adapter handles its own navigation (e.g. boss common.ts)
+   * - `string`: navigate to this specific URL instead of the domain root
+   */
+  navigateBefore?: boolean | string;
 }
 
 /** Internal extension for lazy-loaded TS modules (not exposed in public API) */
@@ -49,7 +60,13 @@ export interface CliOptions extends Partial<Omit<CliCommand, 'args' | 'descripti
   description?: string;
   args?: Arg[];
 }
-const _registry = new Map<string, CliCommand>();
+
+// Use globalThis to ensure a single shared registry across all module instances.
+// This is critical for TS plugins loaded via npm link / peerDependency — without
+// this, the plugin's import creates a separate module instance with its own Map.
+const REGISTRY_KEY = '__opencli_registry__';
+const _registry: Map<string, CliCommand> =
+  (globalThis as any)[REGISTRY_KEY] ??= new Map<string, CliCommand>();
 
 export function cli(opts: CliOptions): CliCommand {
   const strategy = opts.strategy ?? (opts.browser === false ? Strategy.PUBLIC : Strategy.COOKIE);
@@ -67,6 +84,7 @@ export function cli(opts: CliOptions): CliCommand {
     pipeline: opts.pipeline,
     timeoutSeconds: opts.timeoutSeconds,
     footerExtra: opts.footerExtra,
+    navigateBefore: opts.navigateBefore,
   };
 
   const key = fullName(cmd);
