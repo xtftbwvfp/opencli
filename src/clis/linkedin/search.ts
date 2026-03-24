@@ -388,7 +388,7 @@ cli({
     const location = (kwargs.location ?? '').trim();
     const keywords = String(kwargs.query ?? '').trim();
 
-    if (!keywords) throw new Error('query is required');
+    if (!keywords) throw new ArgumentError('query is required');
 
     const searchParams = new URLSearchParams({ keywords });
     if (location) searchParams.set('location', location);
