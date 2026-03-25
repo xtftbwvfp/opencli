@@ -6,6 +6,7 @@ import { clearAllHooks, onAfterExecute } from './hooks.js';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 describe('discoverClis', () => {
   it('handles non-existent directories gracefully', async () => {
@@ -26,7 +27,7 @@ globalThis.__opencli_helper_loaded__ = true;
 export const helper = true;
 `);
       await fs.promises.writeFile(commandPath, `
-import { cli, Strategy } from '${path.join(process.cwd(), 'src', 'registry.ts')}';
+import { cli, Strategy } from '${pathToFileURL(path.join(process.cwd(), 'src', 'registry.ts')).href}';
 cli({
   site: 'temp-site',
   name: 'hello',
@@ -59,7 +60,7 @@ cli({
       await fs.promises.mkdir(siteDir, { recursive: true });
       await fs.promises.writeFile(manifestPath, '{ invalid json');
       await fs.promises.writeFile(commandPath, `
-import { cli, Strategy } from '${path.join(process.cwd(), 'src', 'registry.ts')}';
+import { cli, Strategy } from '${pathToFileURL(path.join(process.cwd(), 'src', 'registry.ts')).href}';
 cli({
   site: 'fallback-site',
   name: 'hello',

@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import type { IPage } from '../../types.js';
 
 const { mockHttpDownload, mockYtdlpDownload, mockExportCookiesToNetscape } = vi.hoisted(() => ({
@@ -64,7 +66,7 @@ describe('stepDownload', () => {
       page,
       {
         url: '${{ item.url }}',
-        dir: '/tmp/opencli-download-test',
+        dir: path.join(os.tmpdir(), 'opencli-download-test'),
         filename: '${{ index }}.txt',
         progress: false,
         concurrency: 1,
@@ -79,13 +81,13 @@ describe('stepDownload', () => {
     expect(mockHttpDownload).toHaveBeenNthCalledWith(
       1,
       'https://a.example/file-1.txt',
-      '/tmp/opencli-download-test/0.txt',
+      path.join(os.tmpdir(), 'opencli-download-test', '0.txt'),
       expect.objectContaining({ cookies: 'sid=a.example' }),
     );
     expect(mockHttpDownload).toHaveBeenNthCalledWith(
       2,
       'https://b.example/file-2.txt',
-      '/tmp/opencli-download-test/1.txt',
+      path.join(os.tmpdir(), 'opencli-download-test', '1.txt'),
       expect.objectContaining({ cookies: 'sid=b.example' }),
     );
   });
